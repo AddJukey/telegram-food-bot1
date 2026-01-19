@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # ========== НАСТРОЙКИ API ==========
 # Получите ключ на roboflow.com
-ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY", "")
+ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY", "rf_YOsm8eOpiLUEhh0oCqu1DzOLMsX2")
 ROBOFLOW_MODEL = "food-detection-6"
 ROBOFLOW_VERSION = "1"
 
