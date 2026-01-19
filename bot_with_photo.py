@@ -14,7 +14,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # ========== НАСТРОЙКИ API ==========
-ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY", "SdDPMkh7re1XETDPXd49")
+ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY", "pxdm5gsSa9zxNzhvq4oX")
 WORKSPACE_NAME = "kalori-lsshy"
 WORKFLOW_ID = "detect-count-and-visualize"
 
