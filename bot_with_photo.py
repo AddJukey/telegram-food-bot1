@@ -3,29 +3,25 @@ import logging
 import asyncio
 import tempfile
 import json
-from telegram import Update, InputFile
+import requests
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from io import BytesIO
 import base64
-
-# === ИЗМЕНЕНИЕ: Добавляем inference-sdk ===
-from inference_sdk import InferenceHTTPClient
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ========== НАСТРОЙКИ API ==========
-# Получите ключ на roboflow.com
 ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY", "SdDPMkh7re1XETDPXd49")
-
-# === ИЗМЕНЕНИЕ: Работаем через Workflow API, а не Model API ===
-# Workflow настройки (ваши данные из скриншота)
 WORKSPACE_NAME = "kalori-lsshy"
 WORKFLOW_ID = "detect-count-and-visualize"
 
+# Workflow API endpoint
+WORKFLOW_URL = f"https://serverless.roboflow.com/workflow/{WORKFLOW_ID}"
+
 # ========== БАЗА ПРОДУКТОВ ==========
-# Расширенная база с переводом и калориями
 FOOD_DATABASE = {
     "apple": {"ru": "яблоко", "calories": 52, "protein": 0.3, "fat": 0.2, "carbs": 14},
     "banana": {"ru": "банан", "calories": 89, "protein": 1.1, "fat": 0.3, "carbs": 23},
@@ -67,97 +63,84 @@ FOOD_DATABASE = {
 async def detect_food_in_photo(photo_bytes):
     """Распознает еду на фото через Roboflow Workflow API"""
     try:
-        # === ИЗМЕНЕНИЕ: Используем Workflow API вместо Model API ===
+        # Кодируем фото в base64
+        img_base64 = base64.b64encode(photo_bytes).decode('utf-8')
         
-        # Создаем временный файл
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
-            tmp.write(photo_bytes)
-            tmp_path = tmp.name
-        
-        # Инициализируем клиент Workflow API
-        client = InferenceHTTPClient(
-            api_url="https://serverless.roboflow.com",
-            api_key="SdDPMkh7re1XETDPXd49"
-        )
-        
-        # Вызываем Workflow (синхронный вызов, оборачиваем в asyncio.to_thread)
-        def run_workflow():
-            return client.run_workflow(
-                workspace_name=WORKSPACE_NAME,
-                workflow_id=WORKFLOW_ID,
-                images={
-                    "image": tmp_path
-                },
-                use_cache=True
-            )
-        
-        # Запускаем в отдельном потоке, чтобы не блокировать event loop
-        result = await asyncio.to_thread(run_workflow)
-        
-        # Удаляем временный файл
-        os.unlink(tmp_path)
-        
-        # === ИЗМЕНЕНИЕ: Обрабатываем результат Workflow ===
-        
-        # Workflow возвращает список результатов, берем первый
-        if isinstance(result, list) and len(result) > 0:
-            result_data = result[0]
-        else:
-            result_data = result
-        
-        # Извлекаем предсказания и визуализацию
-        predictions = result_data.get('predictions', [])
-        visualization = result_data.get('visualization', None)
-        
-        # Обрабатываем предсказания
-        detected_foods = []
-        if predictions:
-            for pred in predictions:
-                food_name = pred.get('class', '').lower()
-                confidence = pred.get('confidence', 0) * 100  # в процентах
-                
-                # Фильтруем только продукты с достаточной уверенностью
-                if confidence > 40:  # Порог 40%
-                    detected_foods.append({
-                        "name": food_name,
-                        "confidence": round(confidence, 1),
-                        "russian_name": FOOD_DATABASE.get(food_name, {}).get("ru", food_name),
-                        "raw_prediction": pred  # сохраняем сырые данные
-                    })
-        
-        # Убираем дубликаты (берем продукт с наибольшей уверенностью)
-        unique_foods = {}
-        for food in detected_foods:
-            name = food["name"]
-            if name not in unique_foods or food["confidence"] > unique_foods[name]["confidence"]:
-                unique_foods[name] = food
-        
-        # Возвращаем результат с визуализацией
-        return {
-            "foods": list(unique_foods.values())[:5],  # Возвращаем топ-5
-            "visualization": visualization  # base64 изображение с разметкой
+        # Формируем запрос к Workflow API
+        params = {
+            "access_key": ROBOFLOW_API_KEY,
+            "workspace": WORKSPACE_NAME
         }
+        
+        # Тело запроса в формате base64
+        payload = {
+            "image": {
+                "type": "base64",
+                "value": img_base64
+            }
+        }
+        
+        # Отправляем запрос (синхронно, оборачиваем в thread)
+        def run_workflow_request():
+            response = requests.post(
+                WORKFLOW_URL,
+                params=params,
+                json=payload,
+                timeout=30
+            )
+            return response
+        
+        # Запускаем в отдельном потоке
+        response = await asyncio.to_thread(run_workflow_request)
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Workflow возвращает список результатов, берем первый
+            if isinstance(result, list) and len(result) > 0:
+                result_data = result[0]
+            else:
+                result_data = result
+            
+            # Извлекаем предсказания
+            predictions = result_data.get('predictions', [])
+            visualization = result_data.get('visualization', None)
+            
+            # Обрабатываем предсказания
+            detected_foods = []
+            if predictions:
+                for pred in predictions:
+                    food_name = pred.get('class', '').lower()
+                    confidence = pred.get('confidence', 0) * 100  # в процентах
+                    
+                    # Фильтруем только продукты с достаточной уверенностью
+                    if confidence > 40:  # Порог 40%
+                        detected_foods.append({
+                            "name": food_name,
+                            "confidence": round(confidence, 1),
+                            "russian_name": FOOD_DATABASE.get(food_name, {}).get("ru", food_name),
+                            "raw_prediction": pred
+                        })
+            
+            # Убираем дубликаты (берем продукт с наибольшей уверенностью)
+            unique_foods = {}
+            for food in detected_foods:
+                name = food["name"]
+                if name not in unique_foods or food["confidence"] > unique_foods[name]["confidence"]:
+                    unique_foods[name] = food
+            
+            # Возвращаем результат с визуализацией
+            return {
+                "foods": list(unique_foods.values())[:5],  # Возвращаем топ-5
+                "visualization": visualization  # base64 изображение с разметкой
+            }
+        else:
+            logger.error(f"Workflow API ошибка: {response.status_code}, {response.text}")
+            return None
             
     except Exception as e:
         logger.error(f"Ошибка распознавания: {e}")
         return None
-
-# ========== ПОИСК КАЛОРИЙ ==========
-def get_calories_info(food_name):
-    """Ищет информацию о калориях для продукта"""
-    # Сначала ищем в локальной базе
-    if food_name in FOOD_DATABASE:
-        return FOOD_DATABASE[food_name]
-    
-    # Если нет в базе, используем примерные значения
-    return {
-        "ru": food_name,
-        "calories": 200,
-        "protein": 10,
-        "fat": 10,
-        "carbs": 20,
-        "source": "примерные значения"
-    }
 
 # ========== ОБРАБОТЧИКИ TELEGRAM ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -172,13 +155,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 *Определение калорий* - для 35+ видов еды
 🔍 *Текстовый поиск* - отправьте название продукта
 🖼 *Визуализация* - покажу разметку на фото
-
-*Примеры распознаваемой еды:*
-• Фрукты: яблоко, банан, апельсин
-• Овощи: морковь, помидор, картофель
-• Готовые блюда: пицца, бургер, суши
-• Десерты: торт, мороженое, шоколад
-• И многое другое!
 
 *Отправьте мне фото еды для анализа!*
 """
@@ -219,15 +195,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         detected_foods = result["foods"]
         visualization = result.get("visualization")
         
-        # Получаем информацию о калориях
+        # Формируем текстовый отчет
         await message.edit_text("📊 *Определяю калорийность...*", parse_mode="Markdown")
         
         response_text = "🍽 *Результаты анализа:*\n\n"
-        
-        total_calories = 0
-        total_protein = 0
-        total_fat = 0
-        total_carbs = 0
         
         # Считаем количество каждого типа еды
         from collections import Counter
@@ -235,47 +206,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for food in detected_foods:
             food_counter[food['name']] += 1
         
+        total_calories = 0
         for i, (food_name, count) in enumerate(food_counter.items(), 1):
             # Получаем информацию о продукте
-            food_info = get_calories_info(food_name)
-            ru_name = FOOD_DATABASE.get(food_name, {}).get("ru", food_name)
-            
-            response_text += f"*{i}. {ru_name.capitalize()}* ({count} шт.)\n"
+            food_info = FOOD_DATABASE.get(food_name, {"ru": food_name, "calories": 200})
+            ru_name = food_info.get("ru", food_name)
             
             # Находим максимальную уверенность для этого типа
             max_conf = max([f['confidence'] for f in detected_foods if f['name'] == food_name])
+            
+            response_text += f"*{i}. {ru_name.capitalize()}* ({count} шт.)\n"
             response_text += f"   🔍 Уверенность: {max_conf}%\n"
-            response_text += f"   🔥 Калории: *{food_info['calories']}* ккал/100г\n"
-            response_text += f"   🥚 Белки: {food_info['protein']}г\n"
-            response_text += f"   🥑 Жиры: {food_info['fat']}г\n"
-            response_text += f"   🍞 Углеводы: {food_info['carbs']}г\n"
+            response_text += f"   🔥 Калории: *{food_info.get('calories', 200)}* ккал/100г\n\n"
             
-            if "source" in food_info:
-                source_icon = "🌐" if food_info["source"] == "Open Food Facts" else "📱"
-                response_text += f"   {source_icon} Источник: {food_info['source']}\n"
-            
-            response_text += "\n"
-            
-            # Суммируем для общего подсчета
-            total_calories += food_info['calories'] * count
-            total_protein += food_info['protein'] * count
-            total_fat += food_info['fat'] * count
-            total_carbs += food_info['carbs'] * count
+            total_calories += food_info.get('calories', 200) * count
         
         # Добавляем общий подсчет
         total_items = sum(food_counter.values())
         if total_items > 0:
             response_text += f"📊 *Общая статистика:*\n"
             response_text += f"• Всего объектов: {total_items}\n"
-            response_text += f"• Уникальных типов: {len(food_counter)}\n\n"
-        
-        # Добавляем примерную калорийность
-        if total_calories > 0:
-            response_text += "🔥 *Примерная калорийность (на 100г каждого продукта):*\n"
-            response_text += f"• *{total_calories} ккал*\n"
-            response_text += f"• Белки: {round(total_protein, 1)}г\n"
-            response_text += f"• Жиры: {round(total_fat, 1)}г\n"
-            response_text += f"• Углеводы: {round(total_carbs, 1)}г\n\n"
+            response_text += f"• Уникальных типов: {len(food_counter)}\n"
+            response_text += f"• Примерная калорийность: *{total_calories} ккал*\n\n"
         
         # Добавляем примечания
         response_text += (
@@ -283,14 +235,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Данные приблизительные\n"
             "• Указано на 100г продукта\n"
             "• Фактическая калорийность зависит от рецепта\n"
-            "• Для точности используйте кухонные весы\n\n"
-            "📝 *Совет:* Для точного подсчета взвесьте продукт и умножьте на коэффициент."
+            "• Для точности используйте кухонные весы"
         )
         
-        # === ИЗМЕНЕНИЕ: Если есть визуализация, отправляем фото с результатами ===
+        # Если есть визуализация, отправляем фото с результатами
         if visualization:
             try:
-                # Извлекаем base64 данные (если есть префикс 'data:image')
+                # Извлекаем base64 данные
                 if ',' in visualization:
                     img_data = visualization.split(',')[1]
                 else:
@@ -350,8 +301,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for category, foods in categories.items():
             response += f"*{category}:*\n"
             for food in foods:
-                ru_name = FOOD_DATABASE[food]["ru"]
-                response += f"• {ru_name}\n"
+                if food in FOOD_DATABASE:
+                    ru_name = FOOD_DATABASE[food]["ru"]
+                    response += f"• {ru_name}\n"
             response += "\n"
         
         response += "Всего: 35+ продуктов\n\n*Отправьте фото или название продукта!*"
@@ -368,6 +320,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Бот использует AI для распознавания еды! 🤖",
             parse_mode="Markdown"
         )
+        
+    elif text in ['/start', 'старт']:
+        await start(update, context)
         
     else:
         # Ищем продукт в базе
