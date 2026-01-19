@@ -20,7 +20,6 @@ WORKFLOW_ID = "detect-count-and-visualize"
 # Workflow API endpoint
 WORKFLOW_URL = f"https://serverless.roboflow.com/workflow/{WORKFLOW_ID}"
 
-
 # ========== БАЗА ПРОДУКТОВ ==========
 FOOD_DATABASE = {
     "apple": {"ru": "яблоко", "calories": 52, "protein": 0.3, "fat": 0.2, "carbs": 14},
