@@ -8,7 +8,6 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from io import BytesIO
 import base64
-from inference_sdk import InferenceHTTPClient
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,27 +19,7 @@ WORKFLOW_ID = "detect-count-and-visualize"
 
 # Workflow API endpoint
 WORKFLOW_URL = f"https://serverless.roboflow.com/workflow/{WORKFLOW_ID}"
-# 1. Import the library
 
-
-# 2. Connect to your workflow
-client = InferenceHTTPClient(
-    api_url="https://serverless.roboflow.com",
-    api_key="SdDPMkh7re1XETDPXd49"
-)
-
-# 3. Run your workflow on an image
-result = client.run_workflow(
-    workspace_name="kalori-lsshy",
-    workflow_id="detect-count-and-visualize",
-    images={
-        "image": "YOUR_IMAGE.jpg" # Path to your image file
-    },
-    use_cache=True # Speeds up repeated requests
-)
-
-# 4. Get your results
-print(result)
 
 # ========== БАЗА ПРОДУКТОВ ==========
 FOOD_DATABASE = {
