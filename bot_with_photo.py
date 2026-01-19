@@ -77,7 +77,7 @@ async def detect_food_in_photo(photo_bytes):
         # Инициализируем клиент Workflow API
         client = InferenceHTTPClient(
             api_url="https://serverless.roboflow.com",
-            api_key=ROBOFLOW_API_KEY
+            api_key="SdDPMkh7re1XETDPXd49"
         )
         
         # Вызываем Workflow (синхронный вызов, оборачиваем в asyncio.to_thread)
